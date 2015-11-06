@@ -181,7 +181,9 @@ function update_to_ftp($update_list)
 	
 
 	$result = true;
+	$connectSuccess = false;
 	if($ftp && $ftp_login){
+		$connectSuccess = true;
 		$log .= date('Y-m-d H:i:s') . " Connected to FTP Server Success\n";
 		if($isPasv){
 			ftp_pasv($ftp, true);
@@ -282,7 +284,9 @@ function update_to_ftp($update_list)
 	$arrayIndex = file_get_contents(dirname(__FILE__)."/arrayIndex.ca");
 	$ftp_array_txtfile="{$SvnHookArrayTxt}{$arrayIndex}.txt"; //执行更新的文件
 	file_put_contents($ftp_update_logfile, $log, FILE_APPEND);
-	file_put_contents($ftp_array_txtfile, $newstr);
+	if($connectSuccess){
+		file_put_contents($ftp_array_txtfile, $newstr);
+	}
 	return $result;
 }
 
