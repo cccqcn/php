@@ -72,7 +72,7 @@ if(true){
 		//然后提交到在线服务器
 
 		if($update_status[0] < $update_status[1]){
-			$svn_update_r = "{$svn_path} update -r {$update_status[0]} {$TMP_UPDATE_DIR}"; 
+			$svn_update_r = "{$svn_path} update -r {$update_status[0]} {$TMP_UPDATE_DIR} --username {$svn_name} --password {$svn_pass} --trust-server-cert   --non-interactive"; 
 			exec($svn_update_r);
 		}
 	   

@@ -6,7 +6,17 @@
 //-----------------------------
 date_default_timezone_set('PRC');
 require_once("post-commit-param.php");
+require('include.php'); 
+use Qcloud_cos\Auth; 
+use Qcloud_cos\Cosapi;
 
+
+	testLog("start");
+$expired = time() + 600000;    
+$bucketName = 'wolf';
+$sign = Auth::appSign($expired, $bucketName);
+
+	testLog("test2");
 
 //获得当前更新的log
 $svnlook_log = "{$svnlook_path} log -r {$argv[2]} {$argv[1]}";
@@ -34,6 +44,21 @@ $author = $output;
 //-----------------------------
 //  函数
 //-----------------------------
+ 
+function testLog($str)
+{
+	//return;
+	global $SvnHookTest;
+	$str = $str."\n";
+	if($str == "start\n")
+	{
+		file_put_contents($SvnHookTest, $str);
+	}
+	else
+	{
+		file_put_contents($SvnHookTest, $str, FILE_APPEND);
+	}
+}
 
 function updateLog($str)
 {
@@ -50,7 +75,10 @@ function updateLog($str)
 */
 function ftp_create_dir($path)
 {
-	global $ftp;
+	global $bucketName;
+	$result  = Cosapi::createFolder($bucketName, $path);
+	return $result;
+/*	global $ftp;
 
 	$dir=split("/", $path);
 	$path="";
@@ -68,6 +96,7 @@ function ftp_create_dir($path)
 		   }
 	}
 	return $ret;
+*/
 }
 
 /**
@@ -78,66 +107,63 @@ function ftp_create_dir($path)
 *
 * @author terry39
 */
-function ftp_rmdirr($ftp_stream, $directory)
+
+function ftp_rmdirr($directory)
 {
-if (!is_resource($ftp_stream) ||
-       get_resource_type($ftp_stream) !== 'FTP Buffer') {
+	global $bucketName, $SvnHookTest;
+	testLog("test5");
+	// Init
+	$i          = 0;
+	$files       = array();
+	$folders    = array();
+	$statusnext = false;
+	$currentfolder = $directory;
 
-       return false;
+	// Get raw file listing
+	$list = Cosapi::listFolder($bucketName, $directory, 50);
+
+	if($list["code"] != 0)
+	{
+		return false;
+	}
+	testLog("test6");
+
+	foreach ($list["data"]["infos"] as $current) {
+
+		   $entry = $current["name"];
+		   $isdir = array_key_exists("sha", $current) ? false : true;
+
+//var_dump($entry);
+//var_dump($isdir);
+
+		   if ($isdir === true) {
+			 $folders[] = $currentfolder . "/" . $entry;
+		   } else {
+			 $files[] = $currentfolder . "/" . $entry;
+		   }
+
+	}
+
+	foreach ($files as $file) {
+		var_dump($file);
+		testLog("\nf:".$file);
+		Cosapi::delFile($bucketName, $file);
+	}
+
+	rsort($folders);
+	foreach ($folders as $folder) {
+		testLog("\nd:".$folder);
+		Cosapi::delFolder($bucketName, $folder);
+	}
+
+	testLog("\nd:".$directory);
+	$over = Cosapi::delFolder($bucketName, $directory);
+	if($list["data"]["has_more"] == true)
+	{
+		$over = $over && ftp_rmdirr($directory);
+	}
+	return $over["code"] == 0 ? true : false;
 }
-
-// Init
-$i          = 0;
-$files       = array();
-$folders    = array();
-$statusnext = false;
-$currentfolder = $directory;
-
-// Get raw file listing
-$list = ftp_rawlist($ftp_stream, $directory, true);
-
-foreach ($list as $current) {
-
-       if (empty($current)) {
-         $statusnext = true;
-         continue;
-       }
-
-       if ($statusnext === true) {
-         $currentfolder = substr($current, 0, -1);
-         $statusnext = false;
-         continue;
-       }
-
-       $split = preg_split('[ ]', $current, 9, PREG_SPLIT_NO_EMPTY);
-       $entry = $split[8];
-       $isdir = ($split[0]{0} === 'd') ? true : false;
-
-       // Skip pointers
-       if ($entry === '.' || $entry === '..') {
-         continue;
-       }
-
-       if ($isdir === true) {
-         $folders[] = $currentfolder . '/' . $entry;
-       } else {
-         $files[] = $currentfolder . '/' . $entry;
-       }
-
-}
-
-foreach ($files as $file) {
-       ftp_delete($ftp_stream, $file);
-}
-
-rsort($folders);
-foreach ($folders as $folder) {
-       ftp_rmdir($ftp_stream, $folder);
-}
-
-return ftp_rmdir($ftp_stream, $directory);
-}
-
 /**
 * 把更新到的文件列表上传到服务器上
 *
@@ -152,8 +178,7 @@ return ftp_rmdir($ftp_stream, $directory);
 
 function update_to_ftp($update_list)
 {	
-	
-	global $argv, $ftp, $author_name, $TMP_UPDATE_DIR, $fileSize, $config, $isPasv, $ftp_ip, $ftp_port, $ftp_username , $ftp_pass, $log_name;
+	global $argv, $bucketName, $ftp, $author_name, $TMP_UPDATE_DIR, $fileSize, $config, $isPasv, $ftp_ip, $ftp_port, $ftp_username , $ftp_pass, $log_name, $SvnHookTest;
 	
 	$dataIndex = $config["dataIndex"];
 
@@ -181,70 +206,63 @@ function update_to_ftp($update_list)
 
 
 #	$ftp = ftp_connect('192.168.0.163','5000');
-	$ftp = ftp_connect($ftp_ip,$ftp_port);
-	$ftp_login = ftp_login($ftp, $ftp_username, $ftp_pass);
+#	$ftp = ftp_connect($ftp_ip,$ftp_port);
+#	$ftp_login = ftp_login($ftp, $ftp_username, $ftp_pass);
 	
 
 	$result = true;
-	if($ftp && $ftp_login){
-		   $log .= date('Y-m-d H:i:s') . " Connected to FTP Server Success\n";
-		   if(isPasv){
-				ftp_pasv($ftp, true);
+	
+	foreach($update_list as $file_cmd){ 
+		   if(substr($file_cmd, 0, 8) == 'Updating') continue;
+		   if(substr($file_cmd, 0, 6) == 'Update') continue;        //这里有最后一行的   Update Reversion NNN 要忽略
+		   $file_cmd = trim($file_cmd);
+		   $cmd = substr($file_cmd, 0, 1);
+		   $file = trim(substr($file_cmd, 1));
+		   $log .= date('Y-m-d H:i:s') . " file_cmd: {$file_cmd}  \n";
+		   $from = $file;
+		   $file = substr($file, strlen($TMP_UPDATE_DIR) + 1); //去掉路径中的开头 $TMP_UPDATE_DIR 路径
+		   $filename = is_dir($from) ? null : array_pop(explode('/', $file));
+		   $to = $ftp_root_dir . str_replace("\\", "/", $file);
+
+		   //计算出路径并创建FTP目录 (如果不存在的话)
+		   $dir = is_dir($from) ? $to : dirname($to);
+		   $mkdirResult = ftp_create_dir($dir);                                  //创建目录
+		   if($mkdirResult["code"] == 0){
+			 $log .= date('Y-m-d H:i:s') . " FTP_MKD\t{$dir}\n";
 		   }
-		   
-			
-			foreach($update_list as $file_cmd){ 
-				   if(substr($file_cmd, 0, 8) == 'Updating') continue;
-				   if(substr($file_cmd, 0, 6) == 'Update') continue;        //这里有最后一行的   Update Reversion NNN 要忽略
-				   $file_cmd = trim($file_cmd);
-				   $cmd = substr($file_cmd, 0, 1);
-				   $file = trim(substr($file_cmd, 1));
-	$log .= date('Y-m-d H:i:s') . " file_cmd: {$file_cmd}  \n";
-				   $from = $file;
-				   $file = substr($file, strlen($TMP_UPDATE_DIR) + 1); //去掉路径中的开头 $TMP_UPDATE_DIR 路径
-				   $filename = is_dir($from) ? null : array_pop(explode('/', $file));
-				   $to = $ftp_root_dir . str_replace("\\", "/", $file);
+		   if(is_dir($from)) continue;
 
-				   //计算出路径并创建FTP目录 (如果不存在的话)
-				   $dir = is_dir($from) ? $to : dirname($to);
-				   if(!@ftp_chdir($ftp,$dir)){
-					 $log .= date('Y-m-d H:i:s') . " FTP_MKD\t{$dir}\n";
-					 ftp_create_dir($dir);                                  //创建目录
-				   }
-				   if(is_dir($from)) continue;
+		   //更新或创建文件
+		   if($cmd == "U" || $cmd == "A"){
+			   $from = str_replace('\\', '/', $from);
+				$rrr = Cosapi::upload($bucketName, $from, $to);
+				$rrr = $rrr["code"] == 0 ? true : false;
+				$result = $result && $rrr;
+				//记录日志
+				$log .= date('Y-m-d H:i:s') . " FTP_PUT\t{$from}\t{$to}" . ($result ? "\tSUCCESS\n" : "\tFALSE\n");
 
-				   //更新或创建文件
-				   if($cmd == "U" || $cmd == "A"){
-				   	$rrr = ftp_put($ftp, $to, $from, FTP_BINARY);
-					 $result = $result && $rrr;
-					 //记录日志
-					 $log .= date('Y-m-d H:i:s') . " FTP_PUT\t{$from}\t{$to}" . ($result ? "\tSUCCESS\n" : "\tFALSE\n");
-
-				   //删除文件或目录
-				   }else if($cmd == "D"){
-					 //-------------------------------
-					 //   这里要判断目标是目录还是文件
-					 //-------------------------------
-
-					 if(@ftp_chdir($ftp,$to)){
-						$r = ftp_rmdirr($ftp, $to);
-						$log .= date('Y-m-d H:i:s') . " FTP_RMD\t{$to}" . ($r ? "\tSUCCESS\n" : "\tFALSE\n");
-					 }else{
-					 	$rrr = ftp_delete($ftp, $to);
-						$result = $result && $rrr;
-						//记录日志
-						$log .= date('Y-m-d H:i:s') . " FTP_DEL\t{$to}" . ($result ? "\tSUCCESS\n" : "\tFALSE\n");
-					 }
-				   }else{
-					 $log .= date('Y-m-d H:i:s') . " UNKNOWN CMD\t{$cmd}\n";
-					 continue;
-				   }
-			}
-	}else{
-		   $log .= date('Y-m-d H:i:s') . " Connected to FTP Server False\n";
-		   $log .= date('Y-m-d H:i:s') . " UPDATE FALSE\n";
-		   $log .= date('Y-m-d H:i:s') . " QUIT UPDATE\n\n";
-		   //return false;
+		   //删除文件或目录
+		   }else if($cmd == "D"){
+			 //-------------------------------
+			 //   这里要判断目标是目录还是文件
+			 //-------------------------------
+			 $isDirResult = Cosapi::statFolder($bucketName, $to);
+			 $isDirResult = $isDirResult["code"] == 0 ? true : false;
+			 testLog("test555");
+			 if($isDirResult == true){
+				$r = ftp_rmdirr($to);
+				$log .= date('Y-m-d H:i:s') . " FTP_RMD\t{$to}" . ($r ? "\tSUCCESS\n" : "\tFALSE\n");
+			 }else{
+				$rrr = Cosapi::delFile($bucketName, $to);
+				$rrr = $rrr["code"] == 0 ? true : false;
+				$result = $result && $rrr;
+				//记录日志
+				$log .= date('Y-m-d H:i:s') . " FTP_DEL\t{$to}" . ($result ? "\tSUCCESS\n" : "\tFALSE\n");
+			 }
+		   }else{
+			 $log .= date('Y-m-d H:i:s') . " UNKNOWN CMD\t{$cmd}\n";
+			 continue;
+		   }
 	}
 
 	//记录最后一次更新成功的版本
@@ -267,6 +285,7 @@ function update_to_ftp($update_list)
 //取得当前更新者帐户名，判断是否有权限更新到运行服务器
 $author_name = $author[count($author) -1];
 
+testLog("test3");
 if(true){
 
 //查看log中是否包含 [UPTO_RUN_SERVER] 指令标记
@@ -289,8 +308,11 @@ if(true){
 
 		   if($update_status[0] < $update_status[1]){
 			 $svn_update_r = "{$svn_path} update -r {$update_status[0]} {$TMP_UPDATE_DIR} --username {$svn_name} --password {$svn_pass} --trust-server-cert   --non-interactive"; 
+			testLog("\n".$svn_update_r);
+			// exec("{$svn_path} cleanup --non-interactive");
 			 exec($svn_update_r);
 		   }
+			testLog("test4");
 		   
 		   $output = array();
 		   exec($svn_update, $output);
