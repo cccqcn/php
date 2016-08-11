@@ -235,7 +235,10 @@ function update_to_ftp($update_list)
 		   //更新或创建文件
 		   if($cmd == "U" || $cmd == "A"){
 			   $from = str_replace('\\', '/', $from);
-				$rrr = Cosapi::upload($bucketName, $from, $to);
+			    $bizAttr = "";
+				$insertOnly = 0;
+				$sliceSize = 3 * 1024 * 1024;
+				$rrr = Cosapi::upload($bucketName, $from, $to, $bizAttr, $sliceSize, $insertOnly);
 				$rrr = $rrr["code"] == 0 ? true : false;
 				$result = $result && $rrr;
 				//记录日志
